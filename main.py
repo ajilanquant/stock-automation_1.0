@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import pytz
 import pandas as pd
 
+print("JOB STARTED AT (IST):", datetime.now(pytz.timezone("Asia/Kolkata")))
+
+
 # Base local storage
 BASE_DATA_DIR = "Market_60"
 
