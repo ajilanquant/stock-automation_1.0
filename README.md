@@ -1,0 +1,1 @@
+# stock downloading automatin project
