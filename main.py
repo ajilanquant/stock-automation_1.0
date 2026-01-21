@@ -68,6 +68,17 @@ symbol_map = {
     "CIPLA.NS": ("Pharmaceuticals", "Cipla"),
     "DIVISLAB.NS": ("Pharmaceuticals", "Divi's Labs"),
     "APOLLOHOSP.NS": ("Pharmaceuticals", "Apollo Hospitals"),
+
+    "TATASTEEL.NS": ("Metals", "Tata Steel"),
+    "JSWSTEEL.NS": ("Metals", "JSW Steel"),
+    "HINDALCO.NS": ("Metals", "Hindalco"),
+    "COALINDIA.NS": ("Metals", "Coal India"),
+    "VEDL.NS": ("Metals", "Vedanta"),
+
+    "IDEA.NS": ("Telecommunication", "Vodafone Idea"),
+    "TATACOMM.NS": ("Telecommunication", "Tata Communications"),
+    "INDUSTOWER.NS": ("Telecommunication", "Indus Towers"),
+    "TEJASNET.NS": ("Telecommunication", "Tejas Networks"),
 }
 
 
