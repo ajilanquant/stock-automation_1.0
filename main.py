@@ -146,7 +146,7 @@ def main():
     drive_service = get_drive_service()
 
     # ROOT FOLDER NAME IN MY DRIVE
-    ROOT_FOLDER_NAME = "Market_60"
+    ROOT_FOLDER_NAME = "Market_60_TEST"
 
     # Ensure root folder exists in My Drive
     root_query = (
