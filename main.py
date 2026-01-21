@@ -68,23 +68,17 @@ symbol_map = {
     "CIPLA.NS": ("Pharmaceuticals", "Cipla"),
     "DIVISLAB.NS": ("Pharmaceuticals", "Divi's Labs"),
     "APOLLOHOSP.NS": ("Pharmaceuticals", "Apollo Hospitals"),
-
-    "TATASTEEL.NS": ("Metals", "Tata Steel"),
-    "JSWSTEEL.NS": ("Metals", "JSW Steel"),
-    "HINDALCO.NS": ("Metals", "Hindalco"),
-    "COALINDIA.NS": ("Metals", "Coal India"),
-    "VEDL.NS": ("Metals", "Vedanta"),
-
-    "IDEA.NS": ("Telecommunication", "Vodafone Idea"),
-    "TATACOMM.NS": ("Telecommunication", "Tata Communications"),
-    "INDUSTOWER.NS": ("Telecommunication", "Indus Towers"),
-    "TEJASNET.NS": ("Telecommunication", "Tejas Networks"),
 }
 
 
 # =========================
-# GOOGLE DRIVE (OAUTH)
+# GOOGLE DRIVE HELPERS
 # =========================
+def safe_drive_name(name: str) -> str:
+    """Replace characters that break Drive query syntax"""
+    return name.replace("'", "’")
+
+
 def get_drive_service():
     token_json = os.environ.get("GDRIVE_OAUTH_TOKEN")
     client_secret_json = os.environ.get("GDRIVE_CLIENT_SECRET")
@@ -108,8 +102,10 @@ def get_drive_service():
 
 
 def get_or_create_folder(service, name, parent_id):
+    safe_name = safe_drive_name(name)
+
     query = (
-        f"name='{name}' and "
+        f"name='{safe_name}' and "
         f"mimeType='application/vnd.google-apps.folder' and "
         f"'{parent_id}' in parents and trashed=false"
     )
@@ -120,13 +116,15 @@ def get_or_create_folder(service, name, parent_id):
     if files:
         return files[0]["id"]
 
-    metadata = {
-        "name": name,
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent_id],
-    }
+    folder = service.files().create(
+        body={
+            "name": safe_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_id],
+        },
+        fields="id",
+    ).execute()
 
-    folder = service.files().create(body=metadata, fields="id").execute()
     return folder["id"]
 
 
@@ -142,17 +140,16 @@ def main():
     print("=" * 60)
 
     target_date_str = now_ist.strftime("%Y-%m-%d")
-
     drive_service = get_drive_service()
 
-    # ROOT FOLDER NAME IN MY DRIVE
     ROOT_FOLDER_NAME = "Market_60_TEST"
 
-    # Ensure root folder exists in My Drive
+    # Ensure root folder exists
     root_query = (
         f"name='{ROOT_FOLDER_NAME}' and "
         f"mimeType='application/vnd.google-apps.folder' and trashed=false"
     )
+
     root_result = drive_service.files().list(
         q=root_query, fields="files(id)"
     ).execute()
@@ -169,47 +166,51 @@ def main():
         ).execute()["id"]
 
     for symbol, (sector, company) in symbol_map.items():
-        print(f"\n📥 {company} ({symbol}) | {sector} | {target_date_str}")
+        try:
+            print(f"\n📥 {company} ({symbol}) | {sector} | {target_date_str}")
 
-        df = yf.download(
-            symbol,
-            interval="1m",
-            start=target_date_str,
-            end=(now_ist + timedelta(days=1)).strftime("%Y-%m-%d"),
-            progress=False,
-        )
+            df = yf.download(
+                symbol,
+                interval="1m",
+                start=target_date_str,
+                end=(now_ist + timedelta(days=1)).strftime("%Y-%m-%d"),
+                progress=False,
+            )
 
-        if df.empty:
-            print("⚠️ No data available")
-            continue
+            if df.empty:
+                print("⚠️ No data available")
+                continue
 
-        if df.index.tzinfo is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(ist)
-        else:
-            df.index = df.index.tz_convert(ist)
+            if df.index.tzinfo is None:
+                df.index = df.index.tz_localize("UTC").tz_convert(ist)
+            else:
+                df.index = df.index.tz_convert(ist)
 
-        df.reset_index(inplace=True)
+            df.reset_index(inplace=True)
 
-        sector_id = get_or_create_folder(drive_service, sector, root_folder_id)
-        company_id = get_or_create_folder(drive_service, company, sector_id)
+            sector_id = get_or_create_folder(drive_service, sector, root_folder_id)
+            company_id = get_or_create_folder(drive_service, company, sector_id)
 
-        filename = f"{symbol.replace('^','').replace('.','_')}_{now_ist.strftime('%Y_%m_%d')}.parquet"
+            filename = f"{symbol.replace('^','').replace('.','_')}_{now_ist.strftime('%Y_%m_%d')}.parquet"
 
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, index=False)
-        buffer.seek(0)
+            buffer = io.BytesIO()
+            df.to_parquet(buffer, index=False)
+            buffer.seek(0)
 
-        media = MediaIoBaseUpload(
-            buffer, mimetype="application/octet-stream", resumable=False
-        )
+            media = MediaIoBaseUpload(
+                buffer, mimetype="application/octet-stream", resumable=False
+            )
 
-        drive_service.files().create(
-            body={"name": filename, "parents": [company_id]},
-            media_body=media,
-            fields="id",
-        ).execute()
+            drive_service.files().create(
+                body={"name": filename, "parents": [company_id]},
+                media_body=media,
+                fields="id",
+            ).execute()
 
-        print(f"✅ Uploaded → {sector}/{company}/{filename}")
+            print(f"✅ Uploaded → {sector}/{company}/{filename}")
+
+        except Exception as e:
+            print(f"❌ Failed for {symbol}: {e}")
 
 
 if __name__ == "__main__":
