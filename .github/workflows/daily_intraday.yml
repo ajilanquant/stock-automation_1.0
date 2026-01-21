@@ -2,7 +2,7 @@ name: Daily Intraday Stock Data
 
 on:
   schedule:
-    # Runs at ~4:30 PM IST (11:00 UTC), Monday–Friday
+    # Runs at 4:30 PM IST (11:00 UTC), Monday to Friday
     - cron: "0 11 * * 1-5"
   workflow_dispatch:
 
@@ -26,8 +26,9 @@ jobs:
 
       - name: Run intraday pipeline
         env:
-          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GDRIVE_OAUTH_TOKEN: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         run: |
           python main.py
+
 
