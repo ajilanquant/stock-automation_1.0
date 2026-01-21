@@ -153,7 +153,7 @@ def main():
     target_date_str = now_ist.strftime("%Y-%m-%d")
     drive_service = get_drive_service()
 
-    ROOT_FOLDER_NAME = "Market_60_TEST"
+    ROOT_FOLDER_NAME = "Market_60"
 
     # Ensure root folder exists
     root_query = (
