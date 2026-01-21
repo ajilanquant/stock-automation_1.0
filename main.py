@@ -6,7 +6,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -83,21 +83,28 @@ symbol_map = {
 
 
 # =========================
-# GOOGLE DRIVE HELPERS
+# GOOGLE DRIVE (OAUTH)
 # =========================
 def get_drive_service():
-    creds_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
-    if not creds_json:
-        raise RuntimeError("Missing GDRIVE_SERVICE_ACCOUNT_JSON")
+    token_json = os.environ.get("GDRIVE_OAUTH_TOKEN")
+    client_secret_json = os.environ.get("GDRIVE_CLIENT_SECRET")
 
-    creds_dict = json.loads(creds_json)
+    if not token_json or not client_secret_json:
+        raise RuntimeError("Missing OAuth secrets")
 
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_dict,
-        scopes=["https://www.googleapis.com/auth/drive"]
+    token_info = json.loads(token_json)
+    client_info = json.loads(client_secret_json)
+
+    creds = Credentials(
+        token=token_info.get("token"),
+        refresh_token=token_info.get("refresh_token"),
+        token_uri=client_info["installed"]["token_uri"],
+        client_id=client_info["installed"]["client_id"],
+        client_secret=client_info["installed"]["client_secret"],
+        scopes=["https://www.googleapis.com/auth/drive"],
     )
 
-    return build("drive", "v3", credentials=credentials)
+    return build("drive", "v3", credentials=creds)
 
 
 def get_or_create_folder(service, name, parent_id):
@@ -113,16 +120,13 @@ def get_or_create_folder(service, name, parent_id):
     if files:
         return files[0]["id"]
 
-    folder_metadata = {
+    metadata = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id],
     }
 
-    folder = service.files().create(
-        body=folder_metadata, fields="id"
-    ).execute()
-
+    folder = service.files().create(body=metadata, fields="id").execute()
     return folder["id"]
 
 
@@ -140,10 +144,29 @@ def main():
     target_date_str = now_ist.strftime("%Y-%m-%d")
 
     drive_service = get_drive_service()
-    root_folder_id = os.environ.get("DRIVE_FOLDER_ID")
 
-    if not root_folder_id:
-        raise RuntimeError("Missing DRIVE_FOLDER_ID")
+    # ROOT FOLDER NAME IN MY DRIVE
+    ROOT_FOLDER_NAME = "Market_60"
+
+    # Ensure root folder exists in My Drive
+    root_query = (
+        f"name='{ROOT_FOLDER_NAME}' and "
+        f"mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    root_result = drive_service.files().list(
+        q=root_query, fields="files(id)"
+    ).execute()
+
+    if root_result["files"]:
+        root_folder_id = root_result["files"][0]["id"]
+    else:
+        root_folder_id = drive_service.files().create(
+            body={
+                "name": ROOT_FOLDER_NAME,
+                "mimeType": "application/vnd.google-apps.folder",
+            },
+            fields="id",
+        ).execute()["id"]
 
     for symbol, (sector, company) in symbol_map.items():
         print(f"\n📥 {company} ({symbol}) | {sector} | {target_date_str}")
@@ -153,7 +176,7 @@ def main():
             interval="1m",
             start=target_date_str,
             end=(now_ist + timedelta(days=1)).strftime("%Y-%m-%d"),
-            progress=False
+            progress=False,
         )
 
         if df.empty:
@@ -176,21 +199,14 @@ def main():
         df.to_parquet(buffer, index=False)
         buffer.seek(0)
 
-        file_metadata = {
-            "name": filename,
-            "parents": [company_id]
-        }
-
         media = MediaIoBaseUpload(
-            buffer,
-            mimetype="application/octet-stream",
-            resumable=False
+            buffer, mimetype="application/octet-stream", resumable=False
         )
 
         drive_service.files().create(
-            body=file_metadata,
+            body={"name": filename, "parents": [company_id]},
             media_body=media,
-            fields="id"
+            fields="id",
         ).execute()
 
         print(f"✅ Uploaded → {sector}/{company}/{filename}")
@@ -198,4 +214,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
