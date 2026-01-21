@@ -1,16 +1,19 @@
 import os
-import yfinance as yf
-from datetime import datetime, timedelta
+import io
+import json
 import pytz
+import yfinance as yf
 import pandas as pd
+from datetime import datetime, timedelta
 
-print("JOB STARTED AT (IST):", datetime.now(pytz.timezone("Asia/Kolkata")))
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 
-# Base local storage
-BASE_DATA_DIR = "Market_60"
-
-# 60 companies: symbol ➝ (sector, company name)
+# =========================
+# STOCK UNIVERSE
+# =========================
 symbol_map = {
     "^NSEI": ("Nifty", "Nifty 50"),
     "RELIANCE.NS": ("Nifty", "Reliance Industries"),
@@ -78,12 +81,69 @@ symbol_map = {
     "TEJASNET.NS": ("Telecommunication", "Tejas Networks"),
 }
 
+
+# =========================
+# GOOGLE DRIVE HELPERS
+# =========================
+def get_drive_service():
+    creds_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
+    if not creds_json:
+        raise RuntimeError("Missing GDRIVE_SERVICE_ACCOUNT_JSON")
+
+    creds_dict = json.loads(creds_json)
+
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+
+    return build("drive", "v3", credentials=credentials)
+
+
+def get_or_create_folder(service, name, parent_id):
+    query = (
+        f"name='{name}' and "
+        f"mimeType='application/vnd.google-apps.folder' and "
+        f"'{parent_id}' in parents and trashed=false"
+    )
+
+    result = service.files().list(q=query, fields="files(id)").execute()
+    files = result.get("files", [])
+
+    if files:
+        return files[0]["id"]
+
+    folder_metadata = {
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+
+    folder = service.files().create(
+        body=folder_metadata, fields="id"
+    ).execute()
+
+    return folder["id"]
+
+
+# =========================
+# MAIN PIPELINE
+# =========================
 def main():
     ist = pytz.timezone("Asia/Kolkata")
-    ist = pytz.timezone("Asia/Kolkata")
-    target_date = datetime.now(ist)
+    now_ist = datetime.now(ist)
 
-    target_date_str = target_date.strftime("%Y-%m-%d")
+    print("=" * 60)
+    print("JOB STARTED AT (IST):", now_ist)
+    print("=" * 60)
+
+    target_date_str = now_ist.strftime("%Y-%m-%d")
+
+    drive_service = get_drive_service()
+    root_folder_id = os.environ.get("DRIVE_FOLDER_ID")
+
+    if not root_folder_id:
+        raise RuntimeError("Missing DRIVE_FOLDER_ID")
 
     for symbol, (sector, company) in symbol_map.items():
         print(f"\n📥 {company} ({symbol}) | {sector} | {target_date_str}")
@@ -92,12 +152,12 @@ def main():
             symbol,
             interval="1m",
             start=target_date_str,
-            end=(target_date + timedelta(days=1)).strftime("%Y-%m-%d"),
+            end=(now_ist + timedelta(days=1)).strftime("%Y-%m-%d"),
             progress=False
         )
 
         if df.empty:
-            print("⚠️ No data")
+            print("⚠️ No data available")
             continue
 
         if df.index.tzinfo is None:
@@ -107,14 +167,35 @@ def main():
 
         df.reset_index(inplace=True)
 
-        folder_path = os.path.join(BASE_DATA_DIR, sector, company)
-        os.makedirs(folder_path, exist_ok=True)
+        sector_id = get_or_create_folder(drive_service, sector, root_folder_id)
+        company_id = get_or_create_folder(drive_service, company, sector_id)
 
-        filename = f"{symbol.replace('^','').replace('.','_')}_{target_date.strftime('%Y_%m_%d')}.parquet"
-        file_path = os.path.join(folder_path, filename)
+        filename = f"{symbol.replace('^','').replace('.','_')}_{now_ist.strftime('%Y_%m_%d')}.parquet"
 
-        df.to_parquet(file_path, index=False)
-        print(f"✅ Saved → {file_path}")
+        buffer = io.BytesIO()
+        df.to_parquet(buffer, index=False)
+        buffer.seek(0)
+
+        file_metadata = {
+            "name": filename,
+            "parents": [company_id]
+        }
+
+        media = MediaIoBaseUpload(
+            buffer,
+            mimetype="application/octet-stream",
+            resumable=False
+        )
+
+        drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id"
+        ).execute()
+
+        print(f"✅ Uploaded → {sector}/{company}/{filename}")
+
 
 if __name__ == "__main__":
     main()
+
